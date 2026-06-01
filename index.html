@@ -184,6 +184,10 @@ input[type=file]{display:none}
   <div class="topbar-btns">
     <button class="btn btn-amber" onclick="exportReporteExcel()">⬇ Reporte Excel</button>
     <button class="btn" onclick="showModal('report')">📋 Ver Reporte</button>
+    <div style="width:1px;background:var(--bdr);height:22px;margin:0 2px"></div>
+    <button class="btn btn-green" onclick="exportarDatos()" title="Guarda todos tus datos en un archivo .json para llevar a otro dispositivo">💾 Exportar Datos</button>
+    <label class="btn btn-blue" style="cursor:pointer" title="Carga un archivo .json previamente exportado">📂 Importar Datos<input type="file" accept=".json" style="display:none" onchange="importarDatos(event)"></label>
+    <div id="sync-status" style="font-size:9px;color:var(--txt3);white-space:nowrap;align-self:center"></div>
   </div>
 </div>
 
@@ -1635,9 +1639,106 @@ document.addEventListener('keydown', function(e){
 });
 
 // ════════════════════════════════════════════════
+// PERSISTENCIA — localStorage + Export/Import JSON
+// ════════════════════════════════════════════════
+var STORAGE_KEY = 'upav_docente_v1';
+var _saveTimer = null;
+
+function guardarLocal(){
+  try{
+    var datos = {
+      version:1, guardado:new Date().toISOString(),
+      ciclos:S.ciclos, materias:S.materias,
+      activeCiclo:S.activeCiclo,
+      nextCicloId:S.nextCicloId, nextMatId:S.nextMatId, nextModId:S.nextModId
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(datos));
+    var el = document.getElementById('sync-status');
+    if(el){
+      var d=new Date(), hm=d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+      el.textContent = '✓ Guardado '+hm;
+    }
+  } catch(e){}
+}
+
+function cargarLocal(){
+  try{
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return false;
+    var d = JSON.parse(raw);
+    if(!d.version) return false;
+    S.ciclos=d.ciclos||S.ciclos; S.materias=d.materias||S.materias;
+    S.activeCiclo=d.activeCiclo||0;
+    S.nextCicloId=d.nextCicloId||S.nextCicloId;
+    S.nextMatId=d.nextMatId||S.nextMatId;
+    S.nextModId=d.nextModId||S.nextModId;
+    return true;
+  } catch(e){ return false; }
+}
+
+// Auto-save al hacer cualquier cambio
+var _origRenderAll = renderAll;
+renderAll = function(){
+  _origRenderAll();
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(guardarLocal, 800);
+};
+
+function exportarDatos(){
+  var datos = {
+    version:1, app:'UPAV Gestion Docente',
+    guardado:new Date().toISOString(),
+    ciclos:S.ciclos, materias:S.materias,
+    activeCiclo:S.activeCiclo,
+    nextCicloId:S.nextCicloId, nextMatId:S.nextMatId, nextModId:S.nextModId
+  };
+  var blob = new Blob([JSON.stringify(datos,null,2)], {type:'application/json'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href=url; a.download='UPAV_datos_'+new Date().toISOString().split('T')[0]+'.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); },1000);
+  toast('💾 Datos exportados — lleva este .json a cualquier dispositivo');
+}
+
+function importarDatos(e){
+  var f=e.target.files[0]; if(!f) return;
+  e.target.value='';
+  var reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      var d=JSON.parse(ev.target.result);
+      if(!d.ciclos||!d.materias){
+        _showDlg('Archivo inválido','No es un backup de UPAV.','alert','','',null); return;
+      }
+      var fecha=d.guardado?new Date(d.guardado).toLocaleString('es-MX'):'desconocida';
+      _showDlg(
+        '¿Cargar estos datos?',
+        'Backup del '+fecha+' · '+d.ciclos.length+' ciclos · '+d.materias.length+' materias. Reemplazará los datos actuales.',
+        'confirm','','',function(ok){
+          if(!ok) return;
+          S.ciclos=d.ciclos; S.materias=d.materias;
+          S.activeCiclo=d.activeCiclo||0;
+          S.nextCicloId=d.nextCicloId||10;
+          S.nextMatId=d.nextMatId||10;
+          S.nextModId=d.nextModId||50;
+          guardarLocal(); renderAll();
+          toast('✅ Datos importados correctamente');
+        }
+      );
+    } catch(err){
+      _showDlg('Error al leer','Verifica que sea un .json válido de UPAV.','alert','','',null);
+    }
+  };
+  reader.readAsText(f);
+}
+
+// ════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════
+var _cargado = cargarLocal();
 renderAll();
+if(_cargado){ toast('✓ Datos restaurados'); } else { guardarLocal(); }
 </script>
 </body>
 </html>
